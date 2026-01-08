@@ -1,8 +1,11 @@
-import typer
-import pandas as pd
-import altair as alt
 import sys
+from pathlib import Path
+from typing import Optional
+
+import altair as alt
 import duckdb
+import pandas as pd
+import typer
 from typing_extensions import Annotated
 
 __version__ = "0.1.0"
@@ -46,30 +49,59 @@ def pd_to_rich_tbl(df: pd.DataFrame) -> None:
 
 @app.command()
 def visualize(
-    query: Annotated[str, typer.Argument(help="SQL query to execute")] = None,
-    x_column: Annotated[str, typer.Option("--x", "-x", help="Column name for X-axis")] = None,
-    y_column: Annotated[str, typer.Option("--y", "-y", help="Column name for Y-axis")] = None,
+    csv: Annotated[Optional[Path], typer.Argument(help="Path to CSV file to load into DuckDB")] = None,
+    query: Annotated[Optional[str], typer.Option("--query", "-q", help="SQL query to execute. If None, a SELECT * will be executed")] = None,
+    x_column: Annotated[Optional[str], typer.Option("--x", "-x", help="Column name for X-axis")] = None,
+    y_column: Annotated[Optional[str], typer.Option("--y", "-y", help="Column name for Y-axis")] = None,
     chart_type: Annotated[str, typer.Option(
         "--type", 
         "-t", 
         help="Type of chart (line or bar)",
         callback=lambda x: x.lower()
     )] = "line",
-    db_file: Annotated[str, typer.Option(
+    db_file: Annotated[Optional[str], typer.Option(
         "--db",
         "-d",
         help="Path to DuckDB database file (optional)"
     )] = None,
     query_only: Annotated[bool, typer.Option(
         "--query-only",
-        "-q",
         help="Output query results to stdout and skip chart creation"
-    )] = False
+    )] = False,
+    limit: Annotated[Optional[int], typer.Option(
+        "--limit",
+        "-l",
+        help="Limit number of rows returned by default query (optional)"
+    )] = None,
+    show_columns_only: Annotated[bool, typer.Option(
+        "--show-columns-only",
+        help="Show available columns from the CSV file and exit"
+    )] = False,
 ):
     """
-    Execute SQL query from stdin, create visualization from results and display it in the browser.
+    Execute SQL query from stdin or from argument, create visualization from results and display it in the browser.
     If no database file is specified, an in-memory database will be used.
     """
+
+    if show_columns_only:
+        if not csv:
+            typer.echo("Error: --show-columns-only requires a CSV file to be specified with the 'csv' argument", err=True)
+            raise typer.Exit(1)
+        try:
+            conn = duckdb.connect(':memory:')
+            conn.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{csv}')")
+            columns = conn.execute("PRAGMA table_info('data')").df()
+            typer.echo("Available columns in the CSV file:")
+            for col in columns['name']:
+                typer.echo(f"- {col}")
+        except Exception as e:
+            typer.echo(f"Error reading CSV file: {str(e)}", err=True)
+            raise typer.Exit(1)
+        finally:
+            if 'conn' in locals():
+                conn.close()
+        raise typer.Exit(0)
+
     try:
         # Check for input from pipe
         if not sys.stdin.isatty():
@@ -80,12 +112,14 @@ def visualize(
         # Prioritize stdin over argument if both are provided
         final_query = query_input if query_input else query
 
-        if not final_query:
-            typer.echo("Error: No SQL query provided. Provide it as an argument or pipe it in.", err=True)
-            typer.echo("Examples:", err=True)
-            typer.echo("  python script.py 'SELECT * FROM table' -x date -y value", err=True)
-            typer.echo("  echo 'SELECT * FROM table' | python script.py -x date -y value", err=True)
-            raise typer.Exit(1)
+        default_query = f"SELECT * FROM read_csv_auto('{csv}')" if csv else None
+
+        if final_query is None and default_query:
+            if limit is not None:
+                default_query += f" LIMIT {limit}"
+            final_query = default_query
+            typer.echo("No query provided, using default query:", err=True)
+            typer.echo(default_query, err=True)
             
         # Connect to DuckDB
         try:
