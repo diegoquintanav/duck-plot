@@ -30,4 +30,7 @@ CI = "https://github.com/lvg77/duck-plot/actions"
 duck-plot = "duck_plot.cli:app"
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = [
+    "pytest",
+    "pytest-cov>=7.0.0",
+]
