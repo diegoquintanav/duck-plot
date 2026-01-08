@@ -111,7 +111,6 @@ def visualize(
 
         # Prioritize stdin over argument if both are provided
         final_query = query_input if query_input else query
-
         default_query = f"SELECT * FROM read_csv_auto('{csv}')" if csv else None
 
         if final_query is None and default_query:
@@ -120,7 +119,14 @@ def visualize(
             final_query = default_query
             typer.echo("No query provided, using default query:", err=True)
             typer.echo(default_query, err=True)
-            
+
+        if not final_query:
+            typer.echo("Error: No file or SQL query provided.", err=True)
+            typer.echo("Examples:", err=True)
+            typer.echo("  python script.py table.csv -x date -y value", err=True)
+            typer.echo("  python script.py -q 'SELECT * FROM table' -x date -y value", err=True)
+            typer.echo("  echo 'SELECT * FROM table' | python script.py -x date -y value", err=True)
+            raise typer.Exit(1)
         # Connect to DuckDB
         try:
             conn = duckdb.connect(db_file if db_file else ':memory:')
